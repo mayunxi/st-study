@@ -34,7 +34,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include "st.h"
+#include "../obj/st.h"
 
 /*
  * Simple error reporting functions.

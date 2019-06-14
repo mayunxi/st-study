@@ -43,7 +43,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <pwd.h>
-#include "st.h"
+#include "../obj/st.h"
 
 
 /******************************************************************
@@ -212,15 +212,17 @@ int main(int argc, char *argv[])
 {
   /* Parse command-line options */
   parse_arguments(argc, argv);
-
+  //根据cpu数创建进程数
+  printf("vp_count:%d\n",vp_count);
   /* Allocate array of server pids */
   if ((vp_pids = calloc(vp_count, sizeof(pid_t))) == NULL)
     err_sys_quit(errfd, "ERROR: calloc failed");
 
   /* Start the daemon */
   if (!interactive_mode)
-    start_daemon();
+    start_daemon(); //deamon:守护进程
 
+  //以下只有守护进程才会执行
   /* Initialize the ST library */
   if (st_init() < 0)
     err_sys_quit(errfd, "ERROR: initialization failed: st_init");
@@ -239,6 +241,7 @@ int main(int argc, char *argv[])
   open_log_files();
 
   /* Start server processes (VPs) */
+  //after this,Parent process becomes a "watchdog" and never returns to main()
   start_processes();
 
   /* Turn time caching on */
@@ -311,7 +314,7 @@ static void parse_arguments(int argc, char *argv[])
 	err_quit(errfd, "ERROR: invalid number of processes: %s", optarg);
       break;
     case 'l':
-      logdir = optarg;
+      logdir = optarg;          //获取目录
       break;
     case 't':
       max_wait_threads = (int) strtol(optarg, &c, 10);
@@ -353,6 +356,7 @@ static void parse_arguments(int argc, char *argv[])
     }
   }
 
+  //interactive_mode交互模式，不用打印日志
   if (logdir == NULL && !interactive_mode) {
     err_report(errfd, "ERROR: logging directory is required\n");
     usage(argv[0]);
@@ -363,7 +367,7 @@ static void parse_arguments(int argc, char *argv[])
 
   if (vp_count == 0 && (vp_count = cpu_count()) < 1)
     vp_count = 1;
-
+  //如果没有指定过绑定地址，则默认
   if (sk_count == 0) {
     sk_count = 1;
     srv_socket[0].addr = "0.0.0.0";
@@ -383,16 +387,21 @@ static void start_daemon(void)
   if (pid > 0)
     exit(0);                  /* parent */
 
+  //父进程退出，子进程立新的session，脱离父进程session的生命周期和tty，也就是说，daemon将不会因为父session关闭而被挂断，也不会将父tty作为标准输入输出。
+  //参考：https://www.jianshu.com/p/d953cac76de9
   /* First child process */
   setsid();                   /* become session leader */
 
+  //double fork
   if ((pid = fork()) < 0)
     err_sys_quit(errfd, "ERROR: fork");
   if (pid > 0)                /* first child */
     exit(0);
 
+  //umask取消进程本身的文件掩码设置
   umask(022);
 
+  //切换工作目录
   if (chdir(logdir) < 0)
     err_sys_quit(errfd, "ERROR: can't change directory to %s: chdir", logdir);
 }
@@ -491,7 +500,7 @@ static void create_listeners(void)
     /*
      * On some platforms (e.g. IRIX, Linux) accept() serialization is never
      * needed for any OS version.  In that case st_netfd_serialize_accept()
-     * is just a no-op. Also see the comment above.
+     * is just a no-op(无操作). Also see the comment above.
      */
     if (serialize_accept && st_netfd_serialize_accept(srv_socket[i].nfd) < 0)
       err_sys_quit(errfd, "ERROR: st_netfd_serialize_accept");
@@ -561,14 +570,13 @@ static void start_processes(void)
     my_pid = getpid();
     return;
   }
-
+  //创建子进程，任务处理都在这里进行
   for (i = 0; i < vp_count; i++) {
     if ((pid = fork()) < 0) {
       err_sys_report(errfd, "ERROR: can't create process: fork");
       if (i == 0)
-	exit(1);
-      err_report(errfd, "WARN: started only %d processes out of %d", i,
-		 vp_count);
+        exit(1);
+      err_report(errfd, "WARN: started only %d processes out of %d", i,vp_count);
       vp_count = i;
       break;
     }
@@ -586,9 +594,9 @@ static void start_processes(void)
    */
 
   /* Install signal handlers */
-  Signal(SIGTERM, wdog_sighandler);  /* terminate */
-  Signal(SIGHUP,  wdog_sighandler);  /* restart   */
-  Signal(SIGUSR1, wdog_sighandler);  /* dump info */
+  Signal(SIGTERM, wdog_sighandler);  /* terminate 结束*/
+  Signal(SIGHUP,  wdog_sighandler);  /* restart  重启子进程，重新加载配置*/
+  Signal(SIGUSR1, wdog_sighandler);  /* dump info 打印当前各进程的侦听端口，线程池线程情况，请求信息*/
 
   /* Now go to sleep waiting for a child termination or a signal */
   for ( ; ; ) {
@@ -829,7 +837,7 @@ static void start_threads(void)
     err_report(errfd, "INFO: process %d (pid %d): starting %d threads"
 	       " on %s:%u", my_index, my_pid, max_wait_threads,
 	       srv_socket[i].addr, srv_socket[i].port);
-    WAIT_THREADS(i) = 0;
+    WAIT_THREADS(i) = 0; //srv_socket[i].wait_threads
     BUSY_THREADS(i) = 0;
     RQST_COUNT(i) = 0;
     for (n = 0; n < max_wait_threads; n++) {
@@ -857,10 +865,14 @@ static void *handle_connections(void *arg)
   srv_nfd = srv_socket[i].nfd;
   fromlen = sizeof(from);
 
-  while (WAIT_THREADS(i) <= max_wait_threads) {
+  while (WAIT_THREADS(i) <= max_wait_threads)
+  {
+      err_report(errfd, "INFO: accepting...");
     cli_nfd = st_accept(srv_nfd, (struct sockaddr *)&from, &fromlen,
      ST_UTIME_NO_TIMEOUT);
-    if (cli_nfd == NULL) {
+    err_report(errfd, "INFO: accepted %d",cli_nfd);
+    if (cli_nfd == NULL)
+    {
       err_sys_report(errfd, "ERROR: can't accept connection: st_accept");
       continue;
     }
@@ -1007,7 +1019,7 @@ static int cpu_count(void)
   int n;
 
 #if defined (_SC_NPROCESSORS_ONLN)
-  n = (int) sysconf(_SC_NPROCESSORS_ONLN);
+  n = (int) sysconf(_SC_NPROCESSORS_ONLN);  //获取cpu核心数
 #elif defined (_SC_NPROC_ONLN)
   n = (int) sysconf(_SC_NPROC_ONLN);
 #elif defined (HPUX)

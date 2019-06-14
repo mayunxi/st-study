@@ -953,6 +953,7 @@ void handle_session(long srv_socket_index, st_netfd_t cli_nfd)
 		   inet_ntoa(*from));
     return;
   }
+  //回复固定内容resp
   if (st_write(cli_nfd, resp, n, ST_UTIME_NO_TIMEOUT) != n) {
     err_sys_report(errfd, "WARN: can't write response to %s: st_write",
 		   inet_ntoa(*from));

@@ -1,5 +1,5 @@
 /obj
-st-study.xcodeproj
+/examples/st-test.xcodeproj
 ._.DS_Store
 .DS_Store
 /LINUX_4.4.0-31-generic_DBG
@@ -7,3 +7,4 @@ st-study.xcodeproj
 /LINUX_4.4.0-141-generic_DBG
 /myworkspace/build-server-Desktop_Qt_5_7_0_GCC_64bit-Debug
 /.idea
+/logs/errors

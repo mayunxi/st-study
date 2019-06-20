@@ -208,6 +208,7 @@ extern void err_quit(int fd, const char *fmt, ...);
  * functions because only those functions prevent blocking of the entire VP
  * process and perform state thread scheduling.
  */
+//函数说明请查看docs/reference.html
 int main(int argc, char *argv[])
 {
   /* Parse command-line options */
@@ -227,7 +228,7 @@ int main(int argc, char *argv[])
   if (st_init() < 0)
     err_sys_quit(errfd, "ERROR: initialization failed: st_init");
 
-  /* Set thread throttling parameters */
+  /* Set thread throttling(限制) parameters */
   set_thread_throttling();
 
   /* Create listening sockets */
@@ -244,7 +245,7 @@ int main(int argc, char *argv[])
   //after this,Parent process becomes a "watchdog" and never returns to main()
   start_processes();
 
-  /* Turn time caching on */
+  /* Turn time caching on(打开时间缓存) */
   st_timecache_set(1);
 
   /* Install signal handlers */
@@ -255,7 +256,7 @@ int main(int argc, char *argv[])
 
   /* Start all threads */
   start_threads();
-
+  err_report(errfd, "INFO: start all threads of process done");
   /* Become a signal processing thread */
   process_signals(NULL);
 
@@ -425,6 +426,7 @@ static void set_thread_throttling(void)
   if (max_wait_threads == 0)
     max_wait_threads = MAX_WAIT_THREADS_DEFAULT * vp_count;
   /* Assuming that each client session needs FD_PER_THREAD file descriptors */
+  int cnt = st_getfdlimit();
   if (max_threads == 0)
     max_threads = (st_getfdlimit() * vp_count) / FD_PER_THREAD / sk_count;
   if (max_wait_threads > max_threads)
@@ -457,9 +459,11 @@ static void create_listeners(void)
   struct hostent *hp;
   unsigned short port;
 
-  for (i = 0; i < sk_count; i++) {
+  for (i = 0; i < sk_count; i++)
+  {
     port = 0;
-    if ((c = strchr(srv_socket[i].addr, ':')) != NULL) {
+    if ((c = strchr(srv_socket[i].addr, ':')) != NULL)
+    {
       *c++ = '\0';
       port = (unsigned short) atoi(c);
     }
@@ -478,19 +482,18 @@ static void create_listeners(void)
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(port);
     serv_addr.sin_addr.s_addr = inet_addr(srv_socket[i].addr);
-    if (serv_addr.sin_addr.s_addr == INADDR_NONE) {
+    if (serv_addr.sin_addr.s_addr == INADDR_NONE)
+    {
       /* not dotted-decimal */
       if ((hp = gethostbyname(srv_socket[i].addr)) == NULL)
-	err_quit(errfd, "ERROR: can't resolve address: %s",
-		 srv_socket[i].addr);
+        err_quit(errfd, "ERROR: can't resolve address: %s",srv_socket[i].addr);
       memcpy(&serv_addr.sin_addr, hp->h_addr, hp->h_length);
     }
     srv_socket[i].port = port;
 
     /* Do bind and listen */
     if (bind(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-      err_sys_quit(errfd, "ERROR: can't bind to address %s, port %hu",
-		   srv_socket[i].addr, port);
+      err_sys_quit(errfd, "ERROR: can't bind to address %s, port %hu",srv_socket[i].addr, port);
     if (listen(sock, listenq_size) < 0)
       err_sys_quit(errfd, "ERROR: listen");
 
@@ -564,7 +567,7 @@ static void start_processes(void)
   int i, status;
   pid_t pid;
   sigset_t mask, omask;
-
+  //如果交互模式,也就是单进程
   if (interactive_mode) {
     my_index = 0;
     my_pid = getpid();
@@ -867,10 +870,9 @@ static void *handle_connections(void *arg)
 
   while (WAIT_THREADS(i) <= max_wait_threads)
   {
-      err_report(errfd, "INFO: accepting...");
-    cli_nfd = st_accept(srv_nfd, (struct sockaddr *)&from, &fromlen,
-     ST_UTIME_NO_TIMEOUT);
-    err_report(errfd, "INFO: accepted %d",cli_nfd);
+     err_report(errfd, "INFO: st accepting...");
+    cli_nfd = st_accept(srv_nfd, (struct sockaddr *)&from, &fromlen,ST_UTIME_NO_TIMEOUT);
+    err_report(errfd, "INFO: accepted client fd:%d",cli_nfd);
     if (cli_nfd == NULL)
     {
       err_sys_report(errfd, "ERROR: can't accept connection: st_accept");
@@ -882,14 +884,14 @@ static void *handle_connections(void *arg)
     WAIT_THREADS(i)--;
     BUSY_THREADS(i)++;
     if (WAIT_THREADS(i) < min_wait_threads && TOTAL_THREADS(i) < max_threads) {
-      /* Create another spare thread */
+      /* Create another spare(空闲) thread */
+      err_report(errfd, "INFO: Create another spare(空闲) thread");
       if (st_thread_create(handle_connections, (void *)i, 0, 0) != NULL)
-	WAIT_THREADS(i)++;
+        WAIT_THREADS(i)++;
       else
-	err_sys_report(errfd, "ERROR: process %d (pid %d): can't create"
-		       " thread", my_index, my_pid);
+        err_sys_report(errfd, "ERROR: process %d (pid %d): can't create thread", my_index, my_pid);
     }
-
+    //处理请求,网页输入网址,会请求两次,第一次为html请求,第二次为图标请求
     handle_session(i, cli_nfd);
 
     st_netfd_close(cli_nfd);
@@ -953,6 +955,7 @@ void handle_session(long srv_socket_index, st_netfd_t cli_nfd)
 		   inet_ntoa(*from));
     return;
   }
+  printf("receive request:%s",buf);
   //回复固定内容resp
   if (st_write(cli_nfd, resp, n, ST_UTIME_NO_TIMEOUT) != n) {
     err_sys_report(errfd, "WARN: can't write response to %s: st_write",
